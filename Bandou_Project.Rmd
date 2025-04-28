@@ -1,0 +1,1287 @@
+---
+title: "Explorateur Gapminder"
+author: "Franck BANDOU"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    theme: flatly
+    social: menu
+    source_code: embed
+    css: styles.css
+    navbar:
+      - { title: "À propos", icon: "fa-info-circle", href: "#section-a-propos" }
+      - { title: "Guide", icon: "fa-question-circle", href: "#section-guide-utilisateur" }
+      - { title: "Données", icon: "fa-database", href: "#section-donnees-completes" }
+runtime: shiny
+---
+
+```{r global_setup, include=FALSE, echo=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+library(flexdashboard)
+```
+
+```{r load_libraries, include=FALSE, echo=FALSE}
+# Chargement des librairies principales
+library(flexdashboard)
+library(highcharter)
+library(dplyr)
+library(gapminder)
+library(shiny)
+library(DT)
+library(plotly)
+library(leaflet)
+library(RColorBrewer)
+library(tidyr)
+library(scales)
+library(shinyWidgets)
+library(knitr)
+library(kableExtra)
+library(reshape2)
+library(janitor)
+library(viridis)
+library(countrycode)
+library(rworldmap)
+library(rworldxtra)
+library(purrr)
+library(stringr)
+library(lubridate)
+library(forcats)
+library(tidyverse)
+library(shinydashboard)
+library(shinythemes)
+library(rintrojs)
+library(jsonlite)
+library(htmltools)
+library(htmlwidgets)
+library(stringdist)
+library(zoo)
+```
+
+```{r data_preparation, include=FALSE, echo=FALSE}
+# Préparation des données de base
+data(gapminder)
+
+countriesSP <- rworldmap::getMap(resolution = "low")
+coords_df <- data.frame(
+  country = as.character(countriesSP@data$NAME),
+  long    = coordinates(countriesSP)[,1],
+  lat     = coordinates(countriesSP)[,2])
+
+# Enrichissement des données gapminder
+gapminder <- gapminder %>%
+  mutate(
+    pop_millions = pop/1e6,
+    gdp_total = gdpPercap * pop,
+    gdp_billions = gdp_total/1e9,
+    year_factor = as.factor(year),
+    pop_growth = NA,
+    gdp_growth = NA,
+    life_growth = NA,
+    decade = floor(year/10) * 10,
+    region = case_when(
+      continent == "Asia" & country %in% c("Japan", "South Korea", "Singapore", "Taiwan", "Hong Kong") ~ "East Asia Developed",
+      continent == "Asia" & country %in% c("China", "India", "Indonesia", "Vietnam", "Philippines", "Thailand", "Malaysia") ~ "East Asia Developing",
+      continent == "Asia" & country %in% c("Saudi Arabia", "Iran", "Iraq", "Kuwait", "United Arab Emirates", "Qatar") ~ "Middle East Oil States",
+      continent == "Asia" & !country %in% c("Japan", "South Korea", "Singapore", "Taiwan", "Hong Kong", "China", "India", "Indonesia", "Vietnam", "Philippines", "Thailand", "Malaysia", "Saudi Arabia", "Iran", "Iraq", "Kuwait", "United Arab Emirates", "Qatar") ~ "Other Asia",
+      continent == "Europe" & country %in% c("Germany", "France", "United Kingdom", "Italy", "Spain") ~ "Western Europe",
+      continent == "Europe" & country %in% c("Poland", "Hungary", "Czech Republic", "Slovakia", "Romania", "Bulgaria") ~ "Eastern Europe",
+      continent == "Europe" & country %in% c("Norway", "Sweden", "Finland", "Denmark", "Iceland") ~ "Nordic Countries",
+      continent == "Europe" & !country %in% c("Germany", "France", "United Kingdom", "Italy", "Spain", "Poland", "Hungary", "Czech Republic", "Slovakia", "Romania", "Bulgaria", "Norway", "Sweden", "Finland", "Denmark", "Iceland") ~ "Other Europe",
+      continent == "Africa" & country %in% c("South Africa", "Egypt", "Nigeria", "Algeria", "Morocco") ~ "Major African Economies",
+      continent == "Africa" & !country %in% c("South Africa", "Egypt", "Nigeria", "Algeria", "Morocco") ~ "Other Africa",
+      continent == "Americas" & country %in% c("United States", "Canada") ~ "North America",
+      continent == "Americas" & country %in% c("Brazil", "Mexico", "Argentina", "Colombia", "Chile") ~ "Major Latin American Economies",
+      continent == "Americas" & !country %in% c("United States", "Canada", "Brazil", "Mexico", "Argentina", "Colombia", "Chile") ~ "Other Americas",
+      continent == "Oceania" ~ "Oceania",
+      TRUE ~ "Other"
+    ),
+    income_group = case_when(
+      gdpPercap < 1000 ~ "Low Income",
+      gdpPercap >= 1000 & gdpPercap < 4000 ~ "Lower Middle Income",
+      gdpPercap >= 4000 & gdpPercap < 12000 ~ "Upper Middle Income",
+      gdpPercap >= 12000 ~ "High Income"
+    ),
+    life_category = case_when(
+      lifeExp < 50 ~ "Below 50",
+      lifeExp >= 50 & lifeExp < 65 ~ "50-65",
+      lifeExp >= 65 & lifeExp < 75 ~ "65-75",
+      lifeExp >= 75 ~ "Above 75"
+    ),
+    pop_category = case_when(
+      pop < 1e6 ~ "< 1M",
+      pop >= 1e6 & pop < 10e6 ~ "1M-10M",
+      pop >= 10e6 & pop < 100e6 ~ "10M-100M",
+      pop >= 100e6 ~ "> 100M"
+    )
+  )
+
+# Calcul des taux de croissance pour chaque pays
+countries <- unique(gapminder$country)
+for(i in countries) {
+  country_data <- gapminder %>% filter(country == i) %>% arrange(year)
+  for(j in 2:nrow(country_data)) {
+    year_diff <- country_data$year[j] - country_data$year[j-1]
+    
+    if(year_diff > 0) {
+      # Population growth (annualized)
+      pop_growth <- (country_data$pop[j] / country_data$pop[j-1])^(1/year_diff) - 1
+      gapminder$pop_growth[gapminder$country == i & gapminder$year == country_data$year[j]] <- pop_growth
+      
+      # GDP growth (annualized)
+      gdp_growth <- (country_data$gdpPercap[j] / country_data$gdpPercap[j-1])^(1/year_diff) - 1
+      gapminder$gdp_growth[gapminder$country == i & gapminder$year == country_data$year[j]] <- gdp_growth
+      
+      # Life expectancy growth (annualized)
+      life_growth <- (country_data$lifeExp[j] - country_data$lifeExp[j-1]) / year_diff
+      gapminder$life_growth[gapminder$country == i & gapminder$year == country_data$year[j]] <- life_growth
+    }
+  }
+}
+
+# Ajout de codes ISO pour faciliter les visualisations géographiques
+gapminder <- gapminder %>%
+  mutate(
+    iso3c = countrycode(country, "country.name", "iso3c", warn = FALSE),
+    iso2c = countrycode(country, "country.name", "iso2c", warn = FALSE)
+  )
+
+
+# Préparation des données pour les analyses régionales
+regional_data <- gapminder %>%
+  group_by(year, continent) %>%
+  summarise(
+    lifeExp = weighted.mean(lifeExp, pop, na.rm = TRUE),
+    gdpPercap = weighted.mean(gdpPercap, pop, na.rm = TRUE),
+    pop = sum(pop, na.rm = TRUE),
+    countries = n_distinct(country),
+    gdp_total = sum(gdp_total, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Préparation des données pour les analyses par groupes de revenu
+income_data <- gapminder %>%
+  group_by(year, income_group) %>%
+  summarise(
+    lifeExp = weighted.mean(lifeExp, pop, na.rm = TRUE),
+    gdpPercap = weighted.mean(gdpPercap, pop, na.rm = TRUE),
+    pop = sum(pop, na.rm = TRUE),
+    countries = n_distinct(country),
+    gdp_total = sum(gdp_total, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Préparation des données pour les corrélations
+correlation_data <- gapminder %>%
+  filter(year == max(year)) %>%
+  select(country, continent, lifeExp, gdpPercap, pop, pop_growth, gdp_growth)
+
+# Données pour les comparaisons
+comparison_metrics <- c("Espérance de vie" = "lifeExp",
+                       "PIB par habitant" = "gdpPercap",
+                       "Population" = "pop",
+                       "Croissance du PIB" = "gdp_growth",
+                       "Croissance démographique" = "pop_growth",
+                       "Croissance de l'espérance de vie" = "life_growth",
+                       "PIB total" = "gdp_total")
+
+# Préparation des données pour analyses historiques
+historical_data <- gapminder %>%
+  group_by(country) %>%
+  mutate(
+    start_year = min(year),
+    end_year = max(year),
+    life_change = lifeExp[year == end_year] - lifeExp[year == start_year],
+    gdp_change = gdpPercap[year == end_year] / gdpPercap[year == start_year],
+    pop_change = pop[year == end_year] / pop[year == start_year]
+  ) %>%
+  ungroup()
+
+# Facteurs pour éviter les erreurs
+gapminder$continent <- as.factor(gapminder$continent)
+gapminder$country <- as.factor(gapminder$country)
+gapminder$region <- as.factor(gapminder$region)
+gapminder$income_group <- factor(gapminder$income_group, 
+                               levels = c("Low Income", "Lower Middle Income", "Upper Middle Income", "High Income"))
+gapminder$life_category <- factor(gapminder$life_category,
+                                levels = c("Below 50", "50-65", "65-75", "Above 75"))
+gapminder$pop_category <- factor(gapminder$pop_category,
+                               levels = c("< 1M", "1M-10M", "10M-100M", "> 100M"))
+
+# Palettes de couleurs
+continent_colors <- c("Africa" = "#E41A1C", "Americas" = "#377EB8", "Asia" = "#4DAF4A", 
+                    "Europe" = "#984EA3", "Oceania" = "#FF7F00")
+
+income_colors <- c("Low Income" = "#d73027", "Lower Middle Income" = "#fc8d59", 
+                 "Upper Middle Income" = "#fee090", "High Income" = "#4575b4")
+
+# Préparation des données moyennes mondiales pour comparaison
+world_averages <- gapminder %>%
+  group_by(year) %>%
+  summarise(
+    lifeExp = weighted.mean(lifeExp, pop, na.rm = TRUE),
+    gdpPercap = weighted.mean(gdpPercap, pop, na.rm = TRUE),
+    pop = sum(pop, na.rm = TRUE),
+    gdp_total = sum(gdp_total, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Création d'une table de lookup pour les pays et leurs continents
+country_lookup <- gapminder %>%
+  select(country, continent, region) %>%
+  distinct()
+
+# Calcul des statistiques de base pour chaque indicateur et année
+yearly_stats <- gapminder %>%
+  group_by(year) %>%
+  summarise(
+    mean_life = mean(lifeExp, na.rm = TRUE),
+    median_life = median(lifeExp, na.rm = TRUE),
+    sd_life = sd(lifeExp, na.rm = TRUE),
+    min_life = min(lifeExp, na.rm = TRUE),
+    max_life = max(lifeExp, na.rm = TRUE),
+    
+    mean_gdp = mean(gdpPercap, na.rm = TRUE),
+    median_gdp = median(gdpPercap, na.rm = TRUE),
+    sd_gdp = sd(gdpPercap, na.rm = TRUE),
+    min_gdp = min(gdpPercap, na.rm = TRUE),
+    max_gdp = max(gdpPercap, na.rm = TRUE),
+    
+    total_pop = sum(pop, na.rm = TRUE),
+    mean_pop = mean(pop, na.rm = TRUE),
+    median_pop = median(pop, na.rm = TRUE),
+    sd_pop = sd(pop, na.rm = TRUE),
+    
+    countries = n_distinct(country),
+    .groups = "drop"
+  )
+
+# Préparation des données pour la page "À propos"
+about_data <- data.frame(
+  year = unique(gapminder$year),
+  countries = sapply(unique(gapminder$year), function(y) {
+    length(unique(gapminder$country[gapminder$year == y]))
+  }),
+  continents = length(unique(gapminder$continent))
+)
+
+# Fonction pour calculer les quantiles par groupe
+calculate_quantiles <- function(data, var, group_var, probs = c(0.25, 0.5, 0.75)) {
+  data %>%
+    group_by(!!sym(group_var)) %>%
+    summarise(
+      q25 = quantile(!!sym(var), probs[1], na.rm = TRUE),
+      q50 = quantile(!!sym(var), probs[2], na.rm = TRUE),
+      q75 = quantile(!!sym(var), probs[3], na.rm = TRUE),
+      .groups = "drop"
+    )
+}
+
+# Création de séries temporelles pour les quantiles par continent
+quantiles_by_continent <- list()
+for (metric in c("lifeExp", "gdpPercap", "pop_millions")) {
+  quantiles_by_continent[[metric]] <- gapminder %>%
+    group_by(year, continent) %>%
+    summarise(
+      q25 = quantile(!!sym(metric), 0.25, na.rm = TRUE),
+      q50 = quantile(!!sym(metric), 0.50, na.rm = TRUE),
+      q75 = quantile(!!sym(metric), 0.75, na.rm = TRUE),
+      .groups = "drop"
+    )
+}
+
+# Fonction pour format décimal
+format_decimal <- function(x, digits = 2) {
+  formatC(x, format = "f", digits = digits, big.mark = " ")
+}
+
+# Options globales pour les graphiques
+options(highcharter.theme = hc_theme_smpl())
+```
+
+```{r user_interface, include=FALSE}
+# Contrôles d'entrée pour le filtre global
+sidebar <- fluidRow(
+  column(12,
+    wellPanel(
+      h4("Filtres globaux", style = "margin-top: 0;"),
+      
+      # Continent
+      selectInput("continent", "Continent:",
+                choices = c("Tous", unique(as.character(gapminder$continent))),
+                selected = "Tous"),
+      
+      # Pays
+      selectizeInput(
+        "country", 
+        "Pays (max 5):",
+        choices = unique(as.character(gapminder$country)),
+        multiple = TRUE,
+        options = list(
+          maxItems = 5,
+          placeholder = 'Sélectionnez jusqu\'à 5 pays',
+          onInitialize = I('function() { this.setValue(""); }')
+        )
+      ),
+      
+      # Période
+      sliderInput("year_range", "Période:",
+                min = min(gapminder$year),
+                max = max(gapminder$year),
+                value = c(min(gapminder$year), max(gapminder$year)),
+                step = 5,
+                sep = ""),
+      
+      # Groupe de revenus
+      checkboxGroupInput("income_groups", "Groupes de revenus:",
+                       choices = levels(gapminder$income_group),
+                       selected = levels(gapminder$income_group)),
+      
+      # Variable Y principale
+      radioButtons("yvar", "Variable principale:",
+                 choices = comparison_metrics,
+                 selected = "lifeExp"),
+      
+      # Type de graphique
+      radioButtons("chart_type", "Type de graphique:",
+                 choices = c("Lignes" = "line", 
+                            "Aires" = "area",
+                            "Colonnes" = "column",
+                            "Scatter" = "scatter"),
+                 selected = "line"),
+      
+      # Échelle logarithmique
+      checkboxInput("log_scale", "Échelle logarithmique", FALSE),
+      
+      # Boutons d'action
+      div(style = "display: flex; justify-content: space-between;",
+          actionButton("update", "Actualiser", 
+                     icon = icon("refresh"),
+                     class = "btn-primary"),
+          downloadButton("dl_data", "Exporter", 
+                       class = "btn-success")
+      ),
+      
+      # Informations sur les données
+      htmlOutput("data_info")
+    ),
+    
+    # Aide rapide
+    helpText("Utilisez les filtres ci-dessus pour explorer les données Gapminder."),
+    helpText("Cliquez sur 'Actualiser' pour mettre à jour tous les graphiques."),
+    tags$hr(),
+    
+    # Section statistiques rapides
+    wellPanel(
+      h4("Statistiques rapides", style = "margin-top: 0;"),
+      uiOutput("quick_stats")
+    )
+  )
+)
+```
+
+```{r reactive_data, include=FALSE}
+# Fonction réactive pour filtrer les données selon les critères
+filtered_data <- reactive({
+  input$update
+  
+  isolate({
+    df <- gapminder
+    
+    # Filtrage par continent
+    if(input$continent != "Tous") {
+      df <- df %>% filter(continent == input$continent)
+    }
+    
+    # Filtrage par pays
+    if(length(input$country) > 0) {
+      df <- df %>% filter(country %in% input$country)
+    }
+    
+    # Filtrage par année
+    df <- df %>% filter(year >= input$year_range[1], year <= input$year_range[2])
+    
+    # Filtrage par groupe de revenus
+    if(length(input$income_groups) > 0) {
+      df <- df %>% filter(income_group %in% input$income_groups)
+    }
+    
+    return(df)
+  })
+})
+
+# Fonction réactive pour les données agrégées (par continent, par année)
+aggregated_data <- reactive({
+  data <- filtered_data()
+  
+  # Agrégation par année et continent
+  data %>%
+    group_by(year, continent) %>%
+    summarise(
+      lifeExp = weighted.mean(lifeExp, pop, na.rm = TRUE),
+      gdpPercap = weighted.mean(gdpPercap, pop, na.rm = TRUE),
+      pop = sum(pop, na.rm = TRUE),
+      pop_millions = pop / 1e6,
+      gdp_total = sum(gdp_total, na.rm = TRUE),
+      gdp_billions = gdp_total / 1e9,
+      countries = n_distinct(country),
+      .groups = "drop"
+    )
+})
+
+# Fonction réactive pour les statistiques rapides
+quick_stats_data <- reactive({
+  data <- filtered_data()
+  latest_year <- max(data$year)
+  
+  data %>%
+    filter(year == latest_year) %>%
+    summarise(
+      countries = n_distinct(country),
+      total_pop = sum(pop, na.rm = TRUE),
+      avg_lifeExp = weighted.mean(lifeExp, pop, na.rm = TRUE),
+      avg_gdpPercap = weighted.mean(gdpPercap, pop, na.rm = TRUE),
+      total_gdp = sum(gdp_total, na.rm = TRUE)
+    )
+})
+
+# Fonction réactive pour les statistiques d'information sur les données
+data_info_text <- reactive({
+  data <- filtered_data()
+  
+  # Nombre de pays et d'observations
+  countries_count <- n_distinct(data$country)
+  observations_count <- nrow(data)
+  year_range <- range(data$year)
+  
+  # Texte HTML avec les informations
+  HTML(paste0(
+    "<small>",
+    "<strong>", countries_count, "</strong> pays, ",
+    "<strong>", observations_count, "</strong> observations<br>",
+    "Période : <strong>", year_range[1], "-", year_range[2], "</strong>",
+    "</small>"
+  ))
+})
+
+# Création de l'affichage des statistiques rapides
+output$quick_stats <- renderUI({
+  stats <- quick_stats_data()
+  
+  # Formatage des chiffres
+  formatted_pop <- format(round(stats$total_pop), big.mark = " ")
+  formatted_gdp <- format(round(stats$total_gdp / 1e9, 1), big.mark = " ")
+  
+  HTML(paste0(
+    "<div style='font-size: 0.9em;'>",
+    "<strong>Pays :</strong> ", stats$countries, "<br>",
+    "<strong>Population totale :</strong> ", formatted_pop, "<br>",
+    "<strong>Espérance de vie moyenne :</strong> ", round(stats$avg_lifeExp, 1), " ans<br>",
+    "<strong>PIB par habitant moyen :</strong> $", format(round(stats$avg_gdpPercap), big.mark = " "), "<br>",
+    "<strong>PIB total :</strong> $", formatted_gdp, " milliards",
+    "</div>"
+  ))
+})
+
+# Affichage des informations sur les données
+output$data_info <- renderText({
+  data_info_text()
+})
+
+# Mise à jour dynamique des pays selon le continent sélectionné
+observeEvent(input$continent, {
+  if(input$continent == "Tous") {
+    countries <- unique(as.character(gapminder$country))
+  } else {
+    countries <- unique(as.character(gapminder$country[gapminder$continent == input$continent]))
+  }
+  
+  updateSelectizeInput(session, "country", 
+                      choices = countries,
+                      selected = intersect(input$country, countries))
+})
+
+# Gestion du téléchargement des données
+output$dl_data <- downloadHandler(
+  filename = function() {
+    paste0("gapminder-data-", 
+           ifelse(input$continent == "Tous", "all", input$continent), "-", 
+           input$year_range[1], "-", input$year_range[2], ".csv")
+  },
+  content = function(file) {
+    write.csv(filtered_data(), file, row.names = FALSE)
+  }
+)
+```
+
+# Vue globale {data-icon="fa-globe"}
+
+## Sidebar
+
+```{r sidebar_global, echo=FALSE}
+sidebar
+```
+
+## Colonne 1 {data-width=600}
+
+### Tendances mondiales
+
+```{r world_trends, echo=FALSE}
+renderHighchart({
+  input$update
+  
+  isolate({
+    # Récupération des données filtrées
+    df <- filtered_data() %>%
+      group_by(year) %>%
+      summarise(
+        lifeExp = weighted.mean(lifeExp, pop, na.rm = TRUE),
+        gdpPercap = weighted.mean(gdpPercap, pop, na.rm = TRUE),
+        pop = sum(pop, na.rm = TRUE),
+        pop_millions = pop / 1e6,
+        gdp_total = sum(gdp_total, na.rm = TRUE),
+        gdp_billions = gdp_total / 1e9,
+        .groups = "drop"
+      )
+    
+    # Sélection de la variable pour l'axe Y
+    y_var <- input$yvar
+    
+    # Définition des titres et formats selon la variable
+    title_text <- paste("Évolution de", 
+                      switch(y_var,
+                             "lifeExp" = "l'espérance de vie",
+                             "gdpPercap" = "PIB par habitant",
+                             "pop" = "la population",
+                             "gdp_growth" = "la croissance du PIB",
+                             "pop_growth" = "la croissance démographique",
+                             "life_growth" = "la croissance de l'espérance de vie",
+                             "gdp_total" = "PIB total"))
+    
+    y_title <- switch(y_var,
+                    "lifeExp" = "Espérance de vie (années)",
+                    "gdpPercap" = "PIB par habitant (USD)",
+                    "pop" = "Population",
+                    "gdp_growth" = "Taux de croissance annuel (%)",
+                    "pop_growth" = "Taux de croissance annuel (%)",
+                    "life_growth" = "Gain annuel (années)",
+                    "gdp_total" = "PIB total (USD)")
+    
+    # Formatage des valeurs pour le tooltip
+    formatter <- switch(y_var,
+                      "lifeExp" = JS("function() { return Highcharts.numberFormat(this.y, 1) + ' ans'; }"),
+                      "gdpPercap" = JS("function() { return '$' + Highcharts.numberFormat(this.y, 0); }"),
+                      "pop" = JS("function() { return Highcharts.numberFormat(this.y, 0) + ' habitants'; }"),
+                      "gdp_growth" = JS("function() { return Highcharts.numberFormat(this.y * 100, 1) + '%'; }"),
+                      "pop_growth" = JS("function() { return Highcharts.numberFormat(this.y * 100, 1) + '%'; }"),
+                      "life_growth" = JS("function() { return Highcharts.numberFormat(this.y, 2) + ' ans'; }"),
+                      "gdp_total" = JS("function() { return '$' + Highcharts.numberFormat(this.y, 0); }"))
+    
+    # Décision d'utiliser une échelle logarithmique ou non
+    y_axis_type <- ifelse(input$log_scale, "logarithmic", "linear")
+    
+    # Ajuster la variable Y si nécessaire
+    if(y_var == "pop") {
+      y_data <- df$pop_millions
+      y_title <- "Population (millions)"
+    } else if(y_var == "gdp_total") {
+      y_data <- df$gdp_billions
+      y_title <- "PIB total (milliards USD)"
+    } else {
+      y_data <- df[[y_var]]
+    }
+    
+    # Création du graphique
+    hc <- highchart() %>%
+      hc_chart(type = input$chart_type) %>%
+      hc_xAxis(title = list(text = "Année"), 
+              categories = df$year,
+              crosshair = TRUE) %>%
+      hc_yAxis(title = list(text = y_title),
+              type = y_axis_type) %>%
+      hc_add_series(name = switch(y_var,
+                               "lifeExp" = "Espérance de vie",
+                               "gdpPercap" = "PIB par habitant",
+                               "pop" = "Population",
+                               "gdp_growth" = "Croissance du PIB",
+                               "pop_growth" = "Croissance démographique",
+                               "life_growth" = "Croissance de l'espérance de vie",
+                               "gdp_total" = "PIB total"),
+                  data = y_data) %>%
+      hc_tooltip(valueDecimals = 2, 
+                pointFormatter = formatter) %>%
+      hc_title(text = title_text) %>%
+      hc_subtitle(text = paste("Période:", input$year_range[1], "-", input$year_range[2])) %>%
+      hc_exporting(enabled = TRUE, 
+                  filename = "gapminder_tendances") %>%
+      hc_plotOptions(series = list(marker = list(enabled = FALSE))) %>%
+      hc_credits(enabled = TRUE, 
+                text = "Source: Gapminder",
+                href = "https://www.gapminder.org") %>%
+      hc_add_theme(hc_theme_smpl())
+    
+    # Ajout d'une zone pour la récession si c'est un graphique de type ligne ou aire
+    if(input$chart_type %in% c("line", "area")) {
+      hc <- hc %>%
+        hc_annotations(
+          list(
+            labels = list(
+              list(
+                point = list(x = 1980, y = 0),
+                text = "Crise pétrolière",
+                shape = "connector",
+                x = -30,
+                y = -30
+              )
+            ),
+            labelOptions = list(
+              backgroundColor = "rgba(255, 255, 255, 0.5)",
+              borderColor = "silver"
+            )
+          )
+        )
+    }
+    
+    # Rendu du graphique
+    hc
+  })
+})
+```
+
+### Tendances par continent
+
+```{r continent_trends, echo=FALSE}
+renderHighchart({
+  input$update
+  
+  isolate({
+    # Données agrégées par continent
+    df <- filtered_data() %>%
+      group_by(year, continent) %>%
+      summarise(
+        lifeExp = weighted.mean(lifeExp, pop, na.rm = TRUE),
+        gdpPercap = weighted.mean(gdpPercap, pop, na.rm = TRUE),
+        pop = sum(pop, na.rm = TRUE),
+        pop_millions = pop / 1e6,
+        gdp_total = sum(gdp_total, na.rm = TRUE),
+        gdp_billions = gdp_total / 1e9,
+        .groups = "drop"
+      )
+    
+    # Sélection de la variable pour l'axe Y
+    y_var <- input$yvar
+    
+    # Définition des titres et formats selon la variable
+    title_text <- paste("Comparaison par continent:",
+                      switch(y_var,
+                             "lifeExp" = "Espérance de vie",
+                             "gdpPercap" = "PIB par habitant",
+                             "pop" = "Population",
+                             "gdp_growth" = "Croissance du PIB",
+                             "pop_growth" = "Croissance démographique",
+                             "life_growth" = "Croissance de l'espérance de vie",
+                             "gdp_total" = "PIB total"))
+    
+    y_title <- switch(y_var,
+                    "lifeExp" = "Espérance de vie (années)",
+                    "gdpPercap" = "PIB par habitant (USD)",
+                    "pop" = "Population",
+                    "gdp_growth" = "Taux de croissance annuel (%)",
+                    "pop_growth" = "Taux de croissance annuel (%)",
+                    "life_growth" = "Gain annuel (années)",
+                    "gdp_total" = "PIB total (USD)")
+    
+    # Formatage des valeurs pour le tooltip
+    formatter <- switch(y_var,
+                      "lifeExp" = JS("function() { return Highcharts.numberFormat(this.y, 1) + ' ans'; }"),
+                      "gdpPercap" = JS("function() { return '$' + Highcharts.numberFormat(this.y, 0); }"),
+                      "pop" = JS("function() { return Highcharts.numberFormat(this.y, 0) + ' millions'; }"),
+                      "gdp_growth" = JS("function() { return Highcharts.numberFormat(this.y * 100, 1) + '%'; }"),
+                      "pop_growth" = JS("function() { return Highcharts.numberFormat(this.y * 100, 1) + '%'; }"),
+                      "life_growth" = JS("function() { return Highcharts.numberFormat(this.y, 2) + ' ans'; }"),
+                      "gdp_total" = JS("function() { return '$' + Highcharts.numberFormat(this.y, 0) + ' milliards'; }"))
+    
+    # Décision d'utiliser une échelle logarithmique ou non
+    y_axis_type <- ifelse(input$log_scale, "logarithmic", "linear")
+    
+    # Ajuster la variable Y si nécessaire
+    if(y_var == "pop") {
+      y_var <- "pop_millions"
+      y_title <- "Population (millions)"
+    } else if(y_var == "gdp_total") {
+      y_var <- "gdp_billions"
+      y_title <- "PIB total (milliards USD)"
+    }
+    
+    # Création du graphique
+    hc <- highchart() %>%
+      hc_chart(type = input$chart_type) %>%
+      hc_xAxis(title = list(text = "Année"), 
+              categories = unique(df$year),
+              crosshair = TRUE) %>%
+      hc_yAxis(title = list(text = y_title),
+              type = y_axis_type) %>%
+      hc_title(text = title_text) %>%
+      hc_subtitle(text = paste("Période:", input$year_range[1], "-", input$year_range[2])) %>%
+      hc_tooltip(valueDecimals = 2, 
+                pointFormatter = formatter) %>%
+      hc_legend(enabled = TRUE) %>%
+      hc_exporting(enabled = TRUE, 
+                  filename = "gapminder_continents") %>%
+      hc_plotOptions(series = list(marker = list(enabled = FALSE))) %>%
+      hc_credits(enabled = TRUE, 
+                text = "Source: Gapminder",
+                href = "https://www.gapminder.org") %>%
+      hc_add_theme(hc_theme_smpl())
+    
+    # Ajout des séries par continent
+    for(continent in unique(df$continent)) {
+      continent_data <- df %>% 
+        filter(continent == !!continent) %>%
+        pull(!!sym(y_var))
+      
+      # Ajouter une série pour chaque continent
+      hc <- hc %>%
+        hc_add_series(
+          name = continent,
+          data = continent_data,
+          color = continent_colors[continent]
+        )
+    }
+    
+    # Rendu du graphique
+    hc
+  })
+})
+```
+
+## Colonne 2 {data-width=500}
+
+### Carte mondiale
+
+```{r world_map, echo=FALSE}
+renderLeaflet({
+  input$update
+  isolate({
+    # DerniĂ¨re annĂ©e filtrĂ©e
+    last_year <- max(filtered_data()$year)
+    map_data <- filtered_data() %>% filter(year == last_year)
+    
+    # Variable de coloration et titre
+    color_var  <- input$yvar
+    title_text <- switch(color_var,
+                         "lifeExp" = "Espérance de vie",
+                         "gdpPercap" = "PIB par habitant",
+                         "pop" = "Population",
+                         "gdp_total" = "PIB total")
+    
+    # Palette selon la variable
+    pal <- if (color_var == "lifeExp") {
+      colorNumeric("viridis", domain = map_data$lifeExp)
+    } else if (color_var == "gdpPercap") {
+      colorNumeric("RdYlGn",  domain = map_data$gdpPercap)
+    } else if (color_var == "pop") {
+      colorNumeric("Blues",   domain = map_data$pop)
+    } else {
+      colorNumeric("Greens",  domain = map_data$gdp_total)
+    }
+    
+    # Affichage de la carte
+    leaflet(map_data) %>%
+      addProviderTiles(providers$CartoDB.Positron) %>%
+      addCircleMarkers(
+        lng = ~long, lat = ~lat,
+        radius = ~scales::rescale(pop, to = c(3, 15)),
+        color = ~pal(get(color_var)),
+        fillOpacity = 0.8,
+        stroke = FALSE,
+        popup = ~paste0(
+          "<strong>", country, "</strong><br>",
+          title_text, ": ", 
+          if (color_var == "lifeExp") round(lifeExp,1) else 
+          if (color_var == "gdpPercap") scales::comma(round(gdpPercap)) else 
+          if (color_var == "pop") scales::comma(pop) else 
+          scales::comma(round(gdp_total)),
+          if (color_var == "lifeExp") " ans" else ""
+        ),
+        label = ~country
+      ) %>%
+      addLegend(
+        position = "bottomright",
+        pal = pal,
+        values = map_data[[color_var]],
+        title = title_text
+      )
+  })
+})
+```
+
+### Tableau de bord
+
+```{r dashboard_table, echo=FALSE}
+renderDT({
+  input$update
+  
+  isolate({
+    # Filtrer les données pour la dernière année disponible
+    last_year <- max(filtered_data()$year)
+    table_data <- filtered_data() %>%
+      filter(year == last_year) %>%
+      arrange(desc(!!sym(input$yvar))) %>%
+      select(country, continent, year, lifeExp, gdpPercap, pop, pop_millions, gdp_total, gdp_billions)
+    
+    # Créer le tableau avec DataTables
+    datatable(table_data,
+              colnames = c("Pays", "Continent", "Année", "Esp. vie", "PIB/hab", "Population", 
+                          "Pop (M)", "PIB total", "PIB (Mrd)"),
+              options = list(
+                pageLength = 10,
+                dom = 'Bfrtip',
+                order = list(list(3, 'desc')),
+                scrollX = TRUE
+              )) %>%
+      formatRound(c("lifeExp"), 1) %>%
+      formatCurrency(c("gdpPercap"), "$", digits = 0) %>%
+      formatRound(c("pop_millions"), 2) %>%
+      formatCurrency(c("gdp_billions"), "$", digits = 1) %>%
+      formatRound(c("gdp_total"), 0) %>%
+      formatStyle(
+        'lifeExp',
+        background = styleColorBar(c(0, 90), 'lightblue'),
+        backgroundSize = '100% 90%',
+        backgroundRepeat = 'no-repeat',
+        backgroundPosition = 'center'
+      ) %>%
+      formatStyle(
+        'gdpPercap',
+        background = styleColorBar(c(0, 50000), 'lightgreen'),
+        backgroundSize = '100% 90%',
+        backgroundRepeat = 'no-repeat',
+        backgroundPosition = 'center'
+      )
+  })
+})
+```
+
+# Analyse comparée {data-icon="fa-chart-bar"}
+
+## Sidebar {.sidebar}
+
+```{r sidebar_compare, echo=FALSE}
+sidebar
+```
+
+## Colonne 1 {data-width=500}
+
+### Relation PIB-Espérance de vie
+
+```{r gdp_life_scatter, echo=FALSE}
+renderPlotly({
+  input$update
+  
+  isolate({
+    # Filtrer les données pour la dernière année disponible
+    last_year <- max(filtered_data()$year)
+    scatter_data <- filtered_data() %>%
+      filter(year == last_year)
+    
+    # Créer le graphique
+    p <- plot_ly(scatter_data, 
+                x = ~gdpPercap, 
+                y = ~lifeExp, 
+                color = ~continent,
+                colors = continent_colors,
+                size = ~pop,
+                sizes = c(5, 50),
+                type = "scatter",
+                mode = "markers",
+                marker = list(opacity = 0.7, sizemode = "diameter"),
+                hoverinfo = "text",
+                text = ~paste("Pays:", country, 
+                             "<br>Continent:", continent,
+                             "<br>PIB/hab: $", format(round(gdpPercap), big.mark = " "),
+                             "<br>Esp. vie:", round(lifeExp, 1), "ans",
+                             "<br>Population:", format(pop, big.mark = " ")))
+    
+    # Configurer les axes
+    p <- p %>% layout(
+      title = paste("Relation PIB par habitant et espérance de vie (", last_year, ")"),
+      xaxis = list(
+        title = "PIB par habitant ($)",
+        type = "log",
+        tickformat = "$,",
+        showgrid = TRUE
+      ),
+      yaxis = list(
+        title = "Espérance de vie (années)",
+        showgrid = TRUE
+      ),
+      legend = list(x = 0.85, y = 0.1),
+      showlegend = TRUE,
+      hovermode = "closest"
+    )
+    
+    p
+  })
+})
+```
+
+### Évolution temporelle
+
+```{r time_evolution, echo=FALSE}
+renderHighchart({
+  input$update
+  
+  isolate({
+    # Récupérer les données filtrées
+    df <- filtered_data()
+    
+    # S'assurer qu'il y a des pays sélectionnés
+    validate(
+      need(length(input$country) > 0 || input$continent != "Tous", "Sélectionnez au moins un pays ou un continent")
+    )
+    
+    # Sélectionner la variable pour l'axe Y
+    y_var <- input$yvar
+    
+    # Définir les variables pour le graphique
+    title_text <- paste("Évolution de", 
+                      switch(y_var,
+                             "lifeExp" = "l'espérance de vie",
+                             "gdpPercap" = "PIB par habitant",
+                             "pop" = "la population",
+                             "gdp_growth" = "la croissance du PIB",
+                             "pop_growth" = "la croissance démographique",
+                             "life_growth" = "la croissance de l'espérance de vie",
+                             "gdp_total" = "PIB total"))
+    
+    y_title <- switch(y_var,
+                    "lifeExp" = "Espérance de vie (années)",
+                    "gdpPercap" = "PIB par habitant (USD)",
+                    "pop" = "Population (millions)",
+                    "gdp_growth" = "Taux de croissance annuel (%)",
+                    "pop_growth" = "Taux de croissance annuel (%)",
+                    "life_growth" = "Gain annuel (années)",
+                    "gdp_total" = "PIB total (milliards USD)")
+    
+    # Ajuster la variable Y si nécessaire
+    if(y_var == "pop") {
+      df$y_value <- df$pop_millions
+    } else if(y_var == "gdp_total") {
+      df$y_value <- df$gdp_billions
+    } else {
+      df$y_value <- df[[y_var]]
+    }
+    
+    # Échelle logarithmique ou linéaire
+    y_axis_type <- ifelse(input$log_scale, "logarithmic", "linear")
+    
+    # Créer le graphique de base
+    hc <- highchart() %>%
+      hc_chart(type = input$chart_type) %>%
+      hc_xAxis(title = list(text = "Année"), 
+              categories = unique(df$year),
+              crosshair = TRUE) %>%
+      hc_yAxis(title = list(text = y_title),
+              type = y_axis_type) %>%
+      hc_title(text = title_text) %>%
+      hc_subtitle(text = paste("Période:", input$year_range[1], "-", input$year_range[2])) %>%
+      hc_tooltip(shared = TRUE) %>%
+      hc_legend(enabled = TRUE) %>%
+      hc_exporting(enabled = TRUE, 
+                  filename = "gapminder_evolution") %>%
+      hc_plotOptions(series = list(marker = list(enabled = FALSE))) %>%
+      hc_credits(enabled = TRUE, 
+                text = "Source: Gapminder",
+                href = "https://www.gapminder.org") %>%
+      hc_add_theme(hc_theme_smpl())
+    
+    # Ajouter des séries pour chaque pays sélectionné
+    if(length(input$country) > 0) {
+      for(country_name in input$country) {
+        country_data <- df %>% 
+          filter(country == country_name) %>%
+          arrange(year)
+        
+        hc <- hc %>%
+          hc_add_series(
+            name = country_name,
+            data = country_data$y_value
+          )
+      }
+    } 
+    # Sinon, ajouter une série par continent
+    else if(input$continent == "Tous") {
+      for(continent_name in unique(df$continent)) {
+        continent_data <- df %>%
+          filter(continent == continent_name) %>%
+          group_by(year) %>%
+          summarise(
+            y_value = if(y_var %in% c("lifeExp", "gdpPercap", "gdp_growth", "pop_growth", "life_growth")) {
+              weighted.mean(y_value, pop, na.rm = TRUE)
+            } else {
+              sum(y_value, na.rm = TRUE)
+            },
+            .groups = "drop"
+          )
+        
+        hc <- hc %>%
+          hc_add_series(
+            name = continent_name,
+            data = continent_data$y_value,
+            color = continent_colors[continent_name]
+          )
+      }
+    }
+    # Si un continent est sélectionné, montrer tous les pays de ce continent
+    else {
+      top_countries <- df %>%
+        filter(continent == input$continent) %>%
+        filter(year == max(year)) %>%
+        arrange(desc(!!sym(y_var))) %>%
+        head(10) %>%
+        pull(country)
+      
+      for(country_name in top_countries) {
+        country_data <- df %>% 
+          filter(country == country_name) %>%
+          arrange(year)
+        
+        hc <- hc %>%
+          hc_add_series(
+            name = country_name,
+            data = country_data$y_value
+          )
+      }
+    }
+    
+    # Rendu du graphique
+    hc
+  })
+})
+```
+
+## Colonne 2 {data-width=500}
+
+### Histogramme comparatif
+
+```{r comparative_histogram, echo=FALSE}
+renderHighchart({
+  input$update
+  
+  isolate({
+    # Filtrer les données pour la dernière année disponible
+    last_year <- max(filtered_data()$year)
+    hist_data <- filtered_data() %>%
+      filter(year == last_year)
+    
+    # Sélectionner la variable pour l'axe Y
+    y_var <- input$yvar
+    
+    # Définir les variables pour le graphique
+    title_text <- paste("Distribution de", 
+                      switch(y_var,
+                             "lifeExp" = "l'espérance de vie",
+                             "gdpPercap" = "PIB par habitant",
+                             "pop" = "la population",
+                             "gdp_growth" = "la croissance du PIB",
+                             "pop_growth" = "la croissance démographique",
+                             "life_growth" = "la croissance de l'espérance de vie",
+                             "gdp_total" = "PIB total"))
+    
+    x_title <- switch(y_var,
+                    "lifeExp" = "Espérance de vie (années)",
+                    "gdpPercap" = "PIB par habitant (USD)",
+                    "pop" = "Population (millions)",
+                    "gdp_growth" = "Taux de croissance annuel (%)",
+                    "pop_growth" = "Taux de croissance annuel (%)",
+                    "life_growth" = "Gain annuel (années)",
+                    "gdp_total" = "PIB total (milliards USD)")
+    
+    # Ajuster la variable Y si nécessaire
+    if(y_var == "pop") {
+      hist_data$value <- hist_data$pop_millions
+    } else if(y_var == "gdp_total") {
+      hist_data$value <- hist_data$gdp_billions
+    } else {
+      hist_data$value <- hist_data[[y_var]]
+    }
+    
+    # Créer le graphique d'histogramme
+    hc <- highchart() %>%
+      hc_chart(type = "column") %>%
+      hc_title(text = paste(title_text, "(", last_year, ")")) %>%
+      hc_xAxis(categories = unique(hist_data$continent),
+              title = list(text = "Continent")) %>%
+      hc_yAxis(title = list(text = x_title),
+              type = ifelse(input$log_scale, "logarithmic", "linear")) %>%
+      hc_legend(enabled = FALSE) %>%
+      hc_tooltip(headerFormat = "<b>{point.key}</b><br>",
+                pointFormat = "{point.y:.2f}") %>%
+      hc_exporting(enabled = TRUE, 
+                  filename = "gapminder_histogram") %>%
+      hc_credits(enabled = TRUE, 
+                text = "Source: Gapminder",
+                href = "https://www.gapminder.org") %>%
+      hc_add_theme(hc_theme_smpl())
+    
+    # Agréger les données par continent
+    for(continent_name in unique(hist_data$continent)) {
+      continent_data <- hist_data %>%
+        filter(continent == continent_name) %>%
+        summarise(
+          value = if(y_var %in% c("lifeExp", "gdpPercap", "gdp_growth", "pop_growth", "life_growth")) {
+            weighted.mean(value, pop, na.rm = TRUE)
+          } else {
+            sum(value, na.rm = TRUE)
+          }
+        ) %>%
+        pull(value)
+      
+      hc <- hc %>%
+        hc_add_series(
+          name = continent_name,
+          data = list(list(y = continent_data, color = continent_colors[continent_name])),
+          showInLegend = FALSE
+        )
+    }
+    
+    # Rendu du graphique
+    hc
+  })
+})
+```
+
+### Matrice de corrélation
+
+```{r correlation_matrix, echo=FALSE}
+renderHighchart({
+  input$update
+  isolate({
+    # Filtrer les données pour la dernière année disponible
+    last_year <- max(filtered_data()$year)
+    corr_data <- filtered_data() %>%
+      filter(year == last_year) %>%
+      select(lifeExp, gdpPercap, pop_millions, gdp_growth, pop_growth, life_growth) %>%
+      rename(
+        "Espérance de vie" = lifeExp,
+        "PIB par habitant" = gdpPercap,
+        "Population (M)" = pop_millions,
+        "Croissance PIB" = gdp_growth,
+        "Croissance pop." = pop_growth,
+        "Gain esp. vie" = life_growth
+      )
+    
+    # Calculer la matrice de corrélation
+    cor_matrix <- cor(corr_data, use = "pairwise.complete.obs")
+    
+    # Créer le heatmap
+    hc <- highchart() %>%
+      hc_chart(type = "heatmap") %>%
+      hc_title(text = "Matrice de corrélation des indicateurs") %>%
+      hc_subtitle(text = paste("Données de", last_year)) %>%
+      hc_xAxis(categories = colnames(cor_matrix)) %>%
+      hc_yAxis(categories = colnames(cor_matrix)) %>%
+      hc_add_series(data = as.data.frame(as.table(cor_matrix)), 
+                    name = "Correlation", 
+                    value = ~value) %>%
+      hc_colorAxis(min = -1, max = 1, stops = color_stops(5, c("red", "white", "green"))) %>%
+      hc_tooltip(pointFormat = "Correlation: {point.value:.2f}") %>%
+      hc_exporting(enabled = TRUE)
+
+    hc
+  })
+})
+```
+
+# Données complètes {data-icon="fa-table"}
+
+## Sidebar {.sidebar}
+
+```{r sidebar_compar, echo=FALSE}
+sidebar
+```
+
+## Données brute 
+
+```{r next, echo=FALSE}
+renderDT({
+  input$update
+  
+  isolate({
+    datatable(
+      filtered_data(),
+      extensions = c('Buttons', 'Scroller'),
+      options = list(
+        dom = 'Bfrtip',
+        buttons = c('copy', 'csv', 'excel', 'pdf'),
+        scrollX = TRUE,
+        scrollY = "500px",
+        scroller = TRUE,
+        pageLength = 10
+      ),
+      rownames = FALSE,
+      filter = 'top'
+    ) %>%
+      formatCurrency("gdpPercap", "$", digits = 0) %>%
+      formatRound("lifeExp", 1) %>%
+      formatRound(c("pop", "gdp_total"), 0) %>%
+      formatStyle(
+        'lifeExp',
+        background = styleColorBar(c(0, 90), 'lightblue'),
+        backgroundSize = '100% 90%',
+        backgroundRepeat = 'no-repeat',
+        backgroundPosition = 'center'
+      ) %>%
+      formatStyle(
+        'gdpPercap',
+        background = styleColorBar(c(0, 50000), 'lightgreen'),
+        backgroundSize = '100% 90%',
+        backgroundRepeat = 'no-repeat',
+        backgroundPosition = 'center'
+      )
+  })
+})
+```
+
+
+# A propos {data-icon="fa-info-circle}
+
+## Section A propos {#section-a-propos}
+
+### Description du projet
+Ce tableau de bord interactif permet d'explorer les données historiques du projet Gapminder, qui documente l'évolution des indicateurs socio-économiques à travers le monde depuis 1952.
+
+#### Fonctionnalités clés :
+
+- Visualisations interactives avec filtres dynamiques
+
+- Comparaisons entre pays et continents
+
+- Analyses temporelles et corrélations
+
+- Export des données et graphiques
+
+#### Sources des données
+Les données proviennent du package R gapminder qui contient un sous-ensemble des données du projet Gapminder.
+
+#### Indicateurs disponibles :
+
+- Espérance de vie (en années)
+
+- PIB par habitant (en dollars US ajustés)
+
+- Population (en nombre d'habitants)
+
+#### Guide utilisateur {#section-guide-utilisateur}
+
+
+- Utilisez les filtres dans la barre latérale pour sélectionner les données
+
+- Cliquez sur "Actualiser" pour appliquer les filtres
+
+- Survolez les graphiques pour plus d'informations
+
+- Utilisez les boutons d'export pour sauvegarder les données
+
+
