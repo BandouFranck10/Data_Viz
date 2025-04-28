@@ -1,0 +1,19 @@
+
+.sidebar {
+  background-color: #f8f9fa;
+  padding: 15px;
+  border-right: 1px solid #dee2e6;
+}
+
+.nav-tabs-custom .nav-tabs li.active {
+  border-top-color: #3c8dbc;
+}
+
+.btn-primary {
+  background-color: #3c8dbc;
+  border-color: #367fa9;
+}
+
+.dataTables_wrapper {
+  font-size: 0.9em;
+}
