@@ -1,0 +1,60 @@
+---
+title: "Readme"
+author: "Franck BANDOU"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Explorateur Gapminder
+
+## Description
+Ce tableau de bord interactif, développé avec R Shiny et Flexdashboard, permet d'explorer les données historiques du projet Gapminder. Il offre des visualisations dynamiques pour analyser l'évolution des indicateurs socio-économiques à travers le monde depuis 1952, tels que l'espérance de vie, le PIB par habitant et la population.
+
+## Fonctionnalités
+- **Visualisations interactives** : Graphiques dynamiques avec filtres personnalisables.
+- **Comparaisons** : Entre pays, continents et groupes de revenus.
+- **Analyses temporelles** : Tendances historiques et corrélations entre indicateurs.
+- **Export des données** : Téléchargement des données filtrées et des graphiques.
+- **Carte mondiale** : Visualisation géographique des indicateurs.
+
+## Indicateurs disponibles
+- Espérance de vie (en années)
+- PIB par habitant (en dollars US ajustés)
+- Population (en nombre d'habitants)
+- Croissance démographique et économique
+
+## Installation
+1. Assurez-vous d'avoir R et RStudio installés.
+2. Installez les packages requis :
+   ```R
+   install.packages(c("flexdashboard", "shiny", "dplyr", "gapminder", "highcharter", "leaflet", "plotly", "DT", "RColorBrewer", "viridis"))
+  ```
+  
+3. Clonez ce dépôt ou téléchargez le fichier Bandou_Project.Rmd.
+
+4. Ouvrez le fichier dans RStudio et cliquez sur "Run Document" pour lancer l'application.
+
+## Utilisation
+1. Filtres globaux : Sélectionnez un continent, des pays, une période et des groupes de revenus.
+
+2. Graphiques : Explorez les tendances mondiales, les comparaisons par continent et les corrélations.
+
+3. Export : Utilisez les boutons pour télécharger les données ou les graphiques.
+
+## Aperçu des onglets
+- Vue globale : Tendances mondiales et par continent, carte interactive.
+
+- Analyse comparée : Relations entre indicateurs, histogrammes et matrices de corrélation.
+
+- Données complètes : Tableau interactif avec toutes les données filtrées.
+
+- À propos : Description du projet et guide utilisateur.
+
+## Auteur
+Franck BANDOU
+
+
+
